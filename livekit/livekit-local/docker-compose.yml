@@ -1,0 +1,11 @@
+version: "3.7"
+services:
+  livekit:
+    image: livekit/livekit-server:latest
+    command: -config /config.yaml
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "55000-55050:55000-55050/udp"
+    volumes:
+      - ./config.yaml:/config.yaml

@@ -1,0 +1,8 @@
+port: 7880
+
+rtc:
+  port_range_start: 55000
+  port_range_end: 55050
+
+keys:
+  devkey: pUgDP1GEGZ8uAzE9aFqbyq1c+zHJuF1qQqxD2xhG9F8=
