@@ -1,6 +1,6 @@
 import { useRoom } from "@/Hooks/useRoom"
 import { useEffect, useRef, useState } from "react"
-import { useNavigate, useParams } from "react-router-dom"
+import { useNavigate, useLocation } from "react-router-dom"
 import { Room, Track, RemoteParticipant, TrackPublication, Participant } from "livekit-client"
 import VideoTile from "./ui/VideoTile"
 import { Button } from "./ui/button"
@@ -8,8 +8,11 @@ import { Button } from "./ui/button"
 const LIVEKIT_WS_URL = "ws://localhost:7880"
 
 const MeetingRoom = () => {
-    const { id: roomId } = useParams()
-    const { token, media, getMedia } = useRoom()
+    const { search } = useLocation()
+    const roomId = new URLSearchParams(search).get("room")
+    const paramsToken = new URLSearchParams(search).get("token")
+    const { token: stateToken, media, getMedia } = useRoom()
+    const token = stateToken || paramsToken
     const navigate = useNavigate()
 
     const roomRef = useRef<Room | null>(null)
@@ -56,6 +59,7 @@ const MeetingRoom = () => {
             roomRef.current?.disconnect()
             roomRef.current?.removeAllListeners()
         }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [token, media, navigate])
 
     useEffect(() => {
@@ -63,13 +67,11 @@ const MeetingRoom = () => {
 
         const room = roomRef.current
 
-        const handleTrackSubscribed = (track: Track, _publication: TrackPublication, participant: RemoteParticipant) => {
-            console.log("Track subscribed:", track.kind, participant.identity)
+        const handleTrackSubscribed = (_track: Track, _publication: TrackPublication, participant: RemoteParticipant) => {
             setParticipants(prev => new Map(prev.set(participant.identity, participant)))
         }
 
-        const handleTrackUnsubscribed = (track: Track, _publication: TrackPublication, participant: RemoteParticipant) => {
-            console.log("Track unsubscribed:", track.kind, participant.identity)
+        const handleTrackUnsubscribed = (_track: Track, _publication: TrackPublication, participant: RemoteParticipant) => {
             const hasActiveTracks = participant.videoTrackPublications.size > 0 ||
                 participant.audioTrackPublications.size > 0
 
@@ -85,12 +87,10 @@ const MeetingRoom = () => {
         }
 
         const handleParticipantConnected = (participant: RemoteParticipant) => {
-            console.log("Participant connected:", participant.identity)
             setParticipants(prev => new Map(prev.set(participant.identity, participant)))
         }
 
         const handleParticipantDisconnected = (participant: RemoteParticipant) => {
-            console.log("Participant disconnected:", participant.identity)
             setParticipants(prev => {
                 const newMap = new Map(prev)
                 newMap.delete(participant.identity)
@@ -99,14 +99,12 @@ const MeetingRoom = () => {
         }
 
         const handleTrackMuted = (_publication: TrackPublication, participant: Participant) => {
-            console.log("Track muted:", participant.identity)
             if (participant instanceof RemoteParticipant) {
                 setParticipants(prev => new Map(prev.set(participant.identity, participant)))
             }
         }
 
         const handleTrackUnmuted = (_publication: TrackPublication, participant: Participant) => {
-            console.log("Track unmuted:", participant.identity)
             if (participant instanceof RemoteParticipant) {
                 setParticipants(prev => new Map(prev.set(participant.identity, participant)))
             }
@@ -127,6 +125,7 @@ const MeetingRoom = () => {
             room.off("trackMuted", handleTrackMuted)
             room.off("trackUnmuted", handleTrackUnmuted)
         }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [roomRef.current])
 
     return (

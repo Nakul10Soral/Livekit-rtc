@@ -99,11 +99,6 @@ const VideoTile = ({ userType, localStreamRef, videoStreamRef, name, isMedia, ro
         }
     }, [videoStreamRef])
 
-    // Debug logging
-    useEffect(() => {
-        console.log(`${userType} participant speaking:`, isSpeaking)
-    }, [isSpeaking, userType])
-
     return (
         <div className={`aspect-video relative rounded-lg w-72 ${isSpeaking ? "border-green-400 border-4" : "border-gray-400 border-2"
             } bg-black overflow-hidden transition-all duration-500 ease-in-out`}>

@@ -45,7 +45,13 @@ export function LoginForm({
       const data = await res.json()
       if (data.token) {
         setToken(data.token)
-        navigate(`/room/${joingDetails.roomId}`)
+        const params = new URLSearchParams({
+          room: joingDetails.roomId,
+          name: joingDetails.name,
+          email: joingDetails.email,
+          token: data.token
+        })
+        navigate(`/room?${params.toString().trim()}`)
       } else {
         alert('error joining room ' + data)
       }
@@ -116,6 +122,10 @@ export function LoginForm({
       }
     }
   }, [getMedia])
+
+  useEffect(() => {
+    
+  })
 
   return (
     <div className={cn("flex flex-col gap-6 w-full max-w-3xl", className)} {...props}>
