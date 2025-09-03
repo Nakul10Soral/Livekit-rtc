@@ -12,6 +12,10 @@ export function LoginForm({
   className,
   ...props
 }: React.ComponentProps<"div">) {
+
+  const { setMedia, setToken, media } = useRoom()
+
+
   const [joingDetails, setJoiningDetails] = useState({
     email: '',
     roomId: '',
@@ -19,20 +23,19 @@ export function LoginForm({
   })
 
   const [localMediaState, setLocalMediaState] = useState({
-    video: true,
-    audio: false
+    video: media.video,
+    audio: media.audio
   })
 
   const testVideoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
 
-  const { setMedia, setToken } = useRoom()
   const navigate = useNavigate()
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     try {
-      const res = await fetch('http://localhost:3001/user-token', {
+      const res = await fetch('https://livekit-token-dksc.onrender.com/user-token', {
         method: "POST",
         headers: {
           'Content-Type': 'application/json'
@@ -118,7 +121,7 @@ export function LoginForm({
     <div className={cn("flex flex-col gap-6 w-full max-w-3xl", className)} {...props}>
       <Card className="overflow-hidden p-0">
         <CardContent className="grid p-0 md:grid-cols-2">
-          <form onSubmit={handleSubmit} className="p-6 md:p-8">
+          <form onSubmit={handleSubmit} className="p-6 order-2 md:p-8">
             <div className="flex flex-col gap-6">
               <div className="flex flex-col items-center text-center">
                 <h1 className="text-2xl font-bold">Welcome to Connect</h1>
@@ -164,7 +167,7 @@ export function LoginForm({
               </Button>
             </div>
           </form>
-          <div className="bg-muted relative hidden md:block overflow-hidden">
+          <div className="bg-muted relative order-1 overflow-hidden">
             <video
               ref={testVideoRef}
               autoPlay

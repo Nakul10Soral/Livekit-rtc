@@ -1,61 +1,30 @@
 import { useRoom } from "@/Hooks/useRoom"
 import { useEffect, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { Room, Track, RemoteParticipant } from "livekit-client"
+import { Room, Track, RemoteParticipant, TrackPublication, Participant } from "livekit-client"
 import VideoTile from "./ui/VideoTile"
+import { Button } from "./ui/button"
 
 const LIVEKIT_WS_URL = "ws://localhost:7880"
 
 const MeetingRoom = () => {
-
-    const [remoteParticipants, setRemoteParticipants] = useState<RemoteParticipant[] | null>(null)
-
     const { id: roomId } = useParams()
-    const { token, media, setMedia } = useRoom()
+    const { token, media, getMedia } = useRoom()
     const navigate = useNavigate()
 
     const roomRef = useRef<Room | null>(null)
     const containerRef = useRef<HTMLDivElement>(null)
+    const localStreamRef = useRef<HTMLVideoElement | null>(null)
 
-    const localStreamRef = useRef<MediaStream | null>(null)
+    const [participants, setParticipants] = useState<Map<string, RemoteParticipant>>(new Map())
 
-
-    const toggleAudio = async () => {
+    const LeaveRoom = () => {
         if (roomRef.current) {
-            try {
-                const newAudioState = !media.audio
-                await roomRef.current.localParticipant.setMicrophoneEnabled(newAudioState)
-                setMedia(prev => ({ ...prev, audio: newAudioState }))
-            } catch (error) {
-                console.error("Error toggling audio:", error)
-            }
+            roomRef.current.disconnect()
+            roomRef.current.removeAllListeners()
+            navigate('/')
         }
     }
-
-    const toggleVideo = async () => {
-        if (roomRef.current) {
-            try {
-                const newVideoState = !media.video
-                await roomRef.current.localParticipant.setCameraEnabled(newVideoState)
-                setMedia(prev => ({ ...prev, video: newVideoState }))
-            } catch (error) {
-                console.error("Error toggling video:", error)
-            }
-        }
-    }
-
-    useEffect(() => {
-        if (roomRef.current) {
-            const localParticipant = roomRef.current.localParticipant
-            const videoPublication = localParticipant.getTrackPublications().find(pub => pub.track?.kind === Track.Kind.Video)
-            const videoTrack = videoPublication?.track
-
-            if (videoTrack && videoTrack.mediaStreamTrack) {
-                const mediaStream = new MediaStream([videoTrack.mediaStreamTrack])
-                localStreamRef.current = mediaStream
-            }
-        }
-    }, [remoteParticipants])
 
     useEffect(() => {
         if (!token) {
@@ -69,11 +38,13 @@ const MeetingRoom = () => {
                 roomRef.current = room
 
                 await room.connect(LIVEKIT_WS_URL, token)
-
                 await room.localParticipant.setCameraEnabled(media.video)
                 await room.localParticipant.setMicrophoneEnabled(media.audio)
 
-                setRemoteParticipants([...room.remoteParticipants.values()])
+                getMedia(localStreamRef)
+
+                setParticipants(new Map(room.remoteParticipants))
+
             } catch (error) {
                 console.error("Error connecting to room:", error)
             }
@@ -88,76 +59,127 @@ const MeetingRoom = () => {
     }, [token, media, navigate])
 
     useEffect(() => {
-        if (roomRef && roomRef.current) {
+        if (!roomRef.current) return
 
-            const room = roomRef.current
+        const room = roomRef.current
 
-            room.on("trackSubscribed", (track) => {
-                if (track.kind === Track.Kind.Video) {
-                    setRemoteParticipants([...room.remoteParticipants.values()])
-                }
-            })
-
-            room.on("trackUnsubscribed", (track) => {
-                if (track.kind === Track.Kind.Video) {
-                    setRemoteParticipants([...room.remoteParticipants.values()])
-                }
-            })
-
-            room.on("participantConnected", () => {
-                setRemoteParticipants([...room.remoteParticipants.values()])
-            })
-
-            room.on("participantMetadataChanged", () => {
-                setRemoteParticipants([...room.remoteParticipants.values()])
-            })
-
-            room.on("participantDisconnected", () => {
-                setRemoteParticipants([...room.remoteParticipants.values()])
-            })
-
-            // room.on('trackMuted', () => {
-
-            // })
+        const handleTrackSubscribed = (track: Track, _publication: TrackPublication, participant: RemoteParticipant) => {
+            console.log("Track subscribed:", track.kind, participant.identity)
+            setParticipants(prev => new Map(prev.set(participant.identity, participant)))
         }
-    }, [])
+
+        const handleTrackUnsubscribed = (track: Track, _publication: TrackPublication, participant: RemoteParticipant) => {
+            console.log("Track unsubscribed:", track.kind, participant.identity)
+            const hasActiveTracks = participant.videoTrackPublications.size > 0 ||
+                participant.audioTrackPublications.size > 0
+
+            if (!hasActiveTracks) {
+                setParticipants(prev => {
+                    const newMap = new Map(prev)
+                    newMap.delete(participant.identity)
+                    return newMap
+                })
+            } else {
+                setParticipants(prev => new Map(prev.set(participant.identity, participant)))
+            }
+        }
+
+        const handleParticipantConnected = (participant: RemoteParticipant) => {
+            console.log("Participant connected:", participant.identity)
+            setParticipants(prev => new Map(prev.set(participant.identity, participant)))
+        }
+
+        const handleParticipantDisconnected = (participant: RemoteParticipant) => {
+            console.log("Participant disconnected:", participant.identity)
+            setParticipants(prev => {
+                const newMap = new Map(prev)
+                newMap.delete(participant.identity)
+                return newMap
+            })
+        }
+
+        const handleTrackMuted = (_publication: TrackPublication, participant: Participant) => {
+            console.log("Track muted:", participant.identity)
+            if (participant instanceof RemoteParticipant) {
+                setParticipants(prev => new Map(prev.set(participant.identity, participant)))
+            }
+        }
+
+        const handleTrackUnmuted = (_publication: TrackPublication, participant: Participant) => {
+            console.log("Track unmuted:", participant.identity)
+            if (participant instanceof RemoteParticipant) {
+                setParticipants(prev => new Map(prev.set(participant.identity, participant)))
+            }
+        }
+
+        room.on("trackSubscribed", handleTrackSubscribed)
+        room.on("trackUnsubscribed", handleTrackUnsubscribed)
+        room.on("participantConnected", handleParticipantConnected)
+        room.on("participantDisconnected", handleParticipantDisconnected)
+        room.on("trackMuted", handleTrackMuted)
+        room.on("trackUnmuted", handleTrackUnmuted)
+
+        return () => {
+            room.off("trackSubscribed", handleTrackSubscribed)
+            room.off("trackUnsubscribed", handleTrackUnsubscribed)
+            room.off("participantConnected", handleParticipantConnected)
+            room.off("participantDisconnected", handleParticipantDisconnected)
+            room.off("trackMuted", handleTrackMuted)
+            room.off("trackUnmuted", handleTrackUnmuted)
+        }
+    }, [roomRef.current])
 
     return (
         <div ref={containerRef} className="dark relative min-h-screen w-full bg-[var(--background)]">
-            <h1 className="text-xl text-accent-foreground">Room Id: {roomId}</h1>
-            <div className="absolute bottom-4 right-4">
-                {
-                    <VideoTile
-                        videoStreamRef={localStreamRef.current}
-                        userType="local"
-                        toggleAudio={toggleAudio}
-                        toggleVideo={toggleVideo}
-                    />
-                }
+            <div className="flex justify-between items-center p-2 mb-4 bg-accent">
+                <h1 className="text-xl text-accent-foreground">Room Id: {roomId}</h1>
+                <h1 className="text-xl text-accent-foreground">
+                    Participants: {participants.size + 1}
+                </h1>
+                <div className="flex gap-2">
+                    <Button variant={'secondary'} onClick={LeaveRoom} className="bg-red-600">
+                        Leave Room
+                    </Button>
+                </div>
             </div>
-            <div className="flex flex-wrap gap-2 justify-center items-center" >
-                {
-                    remoteParticipants &&
-                    remoteParticipants.map((party, index) => {
-                        const videoTrack = party.videoTrackPublications.values().next().value?.track
-                        const audioTrack = party.audioTrackPublications.values().next().value?.track
 
-                        const tracks = []
-                        if (videoTrack) tracks.push(videoTrack.mediaStreamTrack)
-                        if (audioTrack) tracks.push(audioTrack.mediaStreamTrack)
+            <div className="absolute bottom-4 right-4">
+                <VideoTile
+                    localStreamRef={localStreamRef}
+                    userType="local"
+                    roomRef={roomRef}
+                />
+            </div>
 
-                        const mediaStream = tracks.length > 0 ? new MediaStream(tracks) : null
+            <div className="flex flex-wrap gap-2 justify-center items-center">
+                {[...participants.values()].map((participant) => {
+                    const videoPublication = Array.from(participant.videoTrackPublications.values())[0]
+                    const videoTrack = videoPublication?.track
 
-                        return (
-                            <VideoTile
-                                key={index}
-                                videoStreamRef={mediaStream}
-                                userType="remote"
-                                name={party.identity}
-                            />
-                        )
-                    })
-                }
+                    const audioPublication = Array.from(participant.audioTrackPublications.values())[0]
+                    const audioTrack = audioPublication?.track
+
+                    const tracks = []
+                    if (videoTrack?.mediaStreamTrack) tracks.push(videoTrack.mediaStreamTrack)
+                    if (audioTrack?.mediaStreamTrack) tracks.push(audioTrack.mediaStreamTrack)
+
+                    const mediaStream = tracks.length > 0 ? new MediaStream(tracks) : null
+                    const isMediaStreaming = {
+                        audio: participant.isMicrophoneEnabled,
+                        video: participant.isCameraEnabled
+                    }
+
+                    return (
+                        <VideoTile
+                            key={participant.identity}
+                            videoStreamRef={mediaStream}
+                            userType="remote"
+                            name={participant}
+                            isMedia={isMediaStreaming}
+                            roomRef={roomRef}
+                        />
+                    )
+                })}
             </div>
         </div>
     )
