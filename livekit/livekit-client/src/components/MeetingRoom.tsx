@@ -1,9 +1,10 @@
 import { useRoom } from "@/Hooks/useRoom"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useNavigate, useLocation } from "react-router-dom"
 import { Room, Track, RemoteParticipant, TrackPublication, Participant } from "livekit-client"
 import VideoTile from "./ui/VideoTile"
 import { Button } from "./ui/button"
+import { Mic, MicOff, Video, VideoOff } from "lucide-react"
 
 const LIVEKIT_WS_URL = "ws://localhost:7880"
 
@@ -11,15 +12,55 @@ const MeetingRoom = () => {
     const { search } = useLocation()
     const roomId = new URLSearchParams(search).get("room")
     const paramsToken = new URLSearchParams(search).get("token")
-    const { token: stateToken, media, getMedia } = useRoom()
+    const { token: stateToken, media, getMedia, streamRef } = useRoom()
     const token = stateToken || paramsToken
     const navigate = useNavigate()
 
+    const [audio, setAudio] = useState(media.audio)
+    const [video, setVideo] = useState(media.video)
     const roomRef = useRef<Room | null>(null)
     const containerRef = useRef<HTMLDivElement>(null)
     const localStreamRef = useRef<HTMLVideoElement | null>(null)
 
     const [participants, setParticipants] = useState<Map<string, RemoteParticipant>>(new Map())
+
+    const toggleVideo = useCallback(async () => {
+        if (roomRef.current) {
+            try {
+                const newVideoState = !video
+                if (streamRef.current) {
+                    const videoTracks = streamRef.current.getVideoTracks()
+
+                    videoTracks.forEach(track => {
+                        track.enabled = newVideoState
+                    })
+                }
+                await roomRef.current.localParticipant.setCameraEnabled(newVideoState)
+                setVideo(prev => !prev)
+            } catch (error) {
+                console.error("Error toggling video:", error)
+            }
+        }
+    }, [roomRef, video])
+
+    const toggleAudio = useCallback(async () => {
+        if (roomRef.current) {
+            try {
+                const newAudioState = !audio
+                if (streamRef.current) {
+                    const audioTracks = streamRef.current.getAudioTracks()
+
+                    audioTracks.forEach(track => {
+                        track.enabled = newAudioState
+                    })
+                }
+                await roomRef.current.localParticipant.setMicrophoneEnabled(newAudioState)
+                setAudio(prev => !prev)
+            } catch (error) {
+                console.error("Error toggling audio:", error)
+            }
+        }
+    }, [audio, roomRef])
 
     const LeaveRoom = () => {
         if (roomRef.current) {
@@ -59,7 +100,7 @@ const MeetingRoom = () => {
             roomRef.current?.disconnect()
             roomRef.current?.removeAllListeners()
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [token, media, navigate])
 
     useEffect(() => {
@@ -125,11 +166,11 @@ const MeetingRoom = () => {
             room.off("trackMuted", handleTrackMuted)
             room.off("trackUnmuted", handleTrackUnmuted)
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [roomRef.current])
 
     return (
-        <div ref={containerRef} className="dark relative min-h-screen w-full bg-[var(--background)]">
+        <div ref={containerRef} className="dark relative h-screen max-h-screen w-full bg-[var(--background)] flex flex-col overflow-hidden">
             <div className="flex justify-between items-center p-2 mb-4 bg-accent">
                 <h1 className="text-xl text-accent-foreground">Room Id: {roomId}</h1>
                 <h1 className="text-xl text-accent-foreground">
@@ -142,15 +183,16 @@ const MeetingRoom = () => {
                 </div>
             </div>
 
-            <div className="absolute bottom-4 right-4">
+            <div>
+                <h1>hello</h1>
+            </div>
+
+            <div className="flex justify-center flex-1 flex-wrap gap-2 px-4 content-start">
                 <VideoTile
                     localStreamRef={localStreamRef}
                     userType="local"
                     roomRef={roomRef}
                 />
-            </div>
-
-            <div className="flex flex-wrap gap-2 justify-center items-center">
                 {[...participants.values()].map((participant) => {
                     const videoPublication = Array.from(participant.videoTrackPublications.values())[0]
                     const videoTrack = videoPublication?.track
@@ -179,6 +221,36 @@ const MeetingRoom = () => {
                         />
                     )
                 })}
+            </div>
+
+            {/* control footer */}
+            <div className="h-max w-full">
+                <div className="bg-accent mx-auto my-0 w-max p-2 rounded-t-2xl">
+                    <Button
+                        variant="secondary"
+                        className="h-10 w-12 rounded-full"
+                        onClick={toggleVideo}
+                    >
+                        {video ? (
+                            <Video style={{height:"25px", width:'25px'}}  />
+                        ) : (
+                            <VideoOff style={{height:"25px", width:'25px'}} />
+                        )}
+                    </Button>
+
+                    <Button
+                        variant="secondary"
+                        className="h-10 w-12 rounded-full"
+                        onClick={toggleAudio}
+                    >
+                        {audio ? (
+                            <Mic style={{height:"25px", width:'25px'}} />
+                        ) : (
+                            <MicOff style={{height:"25px", width:'25px'}} />
+                        )}
+                    </Button>
+
+                </div>
             </div>
         </div>
     )

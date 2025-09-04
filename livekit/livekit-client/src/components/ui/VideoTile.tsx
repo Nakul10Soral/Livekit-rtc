@@ -1,8 +1,8 @@
-import { Mic, MicOff, Video, VideoOff } from "lucide-react"
-import { Button } from "./button"
-import { useRoom } from "@/Hooks/useRoom"
+import { Hand, Mic, MicOff, Video, VideoOff } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { RemoteParticipant, Room } from "livekit-client"
+import { FilesetResolver, GestureRecognizer, type GestureRecognizerResult } from '@mediapipe/tasks-vision'
+import { Button } from "./button"
 
 interface videoProps {
     userType: 'local' | 'remote',
@@ -15,53 +15,47 @@ interface videoProps {
 
 const VideoTile = ({ userType, localStreamRef, videoStreamRef, name, isMedia, roomRef }: videoProps) => {
 
-    const { media, streamRef } = useRoom()
-
-    const [audio, setAudio] = useState(media.audio)
-    const [video, setVideo] = useState(media.video)
     const [isSpeaking, setIsSpeaking] = useState(false)
+    const [recongnizeGesture, setRecongnizeGesture] = useState(false)
+    const [isGestureRecognizer, setGestureRecognizer] = useState<GestureRecognizerResult | null>(null)
 
     const videoRef = useRef<HTMLVideoElement>(null)
 
-    const toggleAudio = useCallback(async () => {
-        if (roomRef.current) {
-            try {
-                const newAudioState = !audio
-                if (streamRef.current) {
-                    const audioTracks = streamRef.current.getAudioTracks()
+    const lastVideotimeRef = useRef<number>(-1)
 
-                    audioTracks.forEach(track => {
-                        track.enabled = newAudioState
-                    })
-                }
-                await roomRef.current.localParticipant.setMicrophoneEnabled(newAudioState)
-                setAudio(prev => !prev)
-            } catch (error) {
-                console.error("Error toggling audio:", error)
+    const createGestureRecognizer = useCallback(async () => {
+        if (localStreamRef && localStreamRef.current) {
+            const vision = await FilesetResolver.forVisionTasks(
+                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
+            );
+            const gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
+                baseOptions: {
+                    modelAssetPath: "https://storage.googleapis.com/mediapipe-tasks/gesture_recognizer/gesture_recognizer.task",
+                    delegate: 'GPU',
+                },
+                numHands: 2,
+                runningMode: 'VIDEO'
+            });
+            const currentTime = performance.now()
+            if (localStreamRef.current.currentTime !== lastVideotimeRef.current) {
+                lastVideotimeRef.current = localStreamRef.current.currentTime
+                const result = gestureRecognizer.recognizeForVideo(localStreamRef.current, currentTime)
+                setGestureRecognizer(result)
             }
         }
-    }, [audio, roomRef])
+    }, [localStreamRef])
 
-    const toggleVideo = useCallback(async () => {
-        if (roomRef.current) {
-            try {
-                const newVideoState = !video
-                if (streamRef.current) {
-                    const videoTracks = streamRef.current.getVideoTracks()
-
-                    videoTracks.forEach(track => {
-                        track.enabled = newVideoState
-                    })
-                }
-                await roomRef.current.localParticipant.setCameraEnabled(newVideoState)
-                setVideo(prev => !prev)
-            } catch (error) {
-                console.error("Error toggling video:", error)
-            }
+    useEffect(() => {
+        if (recongnizeGesture) {
+            createGestureRecognizer()
         }
-    }, [roomRef, video])
+    })
 
-    // Handle speaking state changes
+    useEffect(() => {
+        console.log(isGestureRecognizer, 'here')
+    }, [isGestureRecognizer])
+
+
     useEffect(() => {
         if (userType === 'remote' && name) {
             const updateSpeaking = () => {
@@ -100,8 +94,7 @@ const VideoTile = ({ userType, localStreamRef, videoStreamRef, name, isMedia, ro
     }, [videoStreamRef])
 
     return (
-        <div className={`aspect-video relative rounded-lg w-72 ${isSpeaking ? "border-green-400 border-4" : "border-gray-400 border-2"
-            } bg-black overflow-hidden transition-all duration-500 ease-in-out`}>
+        <div className={`flex-1 min-w-60 self-start h-auto aspect-video relative rounded-lg max-w-80 ${isSpeaking ? "border-green-400 border-4" : "border-gray-400 border-2"} bg-black overflow-hidden transition-all duration-500 ease-in-out`}>
             <div className="absolute z-10 flex p-2 justify-between w-full">
                 <h6 className="text-sm font-semibold text-accent-foreground">
                     {userType === 'local' ? "You" : name?.identity || 'user'}
@@ -143,26 +136,17 @@ const VideoTile = ({ userType, localStreamRef, videoStreamRef, name, isMedia, ro
                         variant="secondary"
                         size="icon"
                         className="size-9 rounded-full"
-                        onClick={toggleVideo}
+                        onClick={() => setRecongnizeGesture(!recongnizeGesture)}
                     >
                         {
-                            video ?
-                                <Video size={20} /> :
-                                <VideoOff size={20} />
+                            <Hand size={20} />
                         }
                     </Button>
-                    <Button
-                        variant="secondary"
-                        size="icon"
-                        className="size-9 rounded-full"
-                        onClick={toggleAudio}
-                    >
-                        {
-                            audio ?
-                                <Mic size={20} /> :
-                                <MicOff size={20} />
-                        }
-                    </Button>
+                    {
+                        isGestureRecognizer?.gestures.map((item, index) => (
+                            <h1 className="text-2xl text-black font-bold">{item[index].categoryName}</h1>
+                        ))
+                    }
                 </div>
             }
         </div>
