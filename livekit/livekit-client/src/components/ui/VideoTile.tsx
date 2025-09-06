@@ -1,8 +1,9 @@
 import { Hand, Mic, MicOff, Video, VideoOff } from "lucide-react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import type { RemoteParticipant, Room } from "livekit-client"
-import { FilesetResolver, GestureRecognizer, type GestureRecognizerResult } from '@mediapipe/tasks-vision'
 import { Button } from "./button"
+import useGesture from "@/Hooks/useGesture"
+import useVirtualBackground from "@/Hooks/useVirtualBackground"
 
 interface videoProps {
     userType: 'local' | 'remote',
@@ -16,45 +17,12 @@ interface videoProps {
 const VideoTile = ({ userType, localStreamRef, videoStreamRef, name, isMedia, roomRef }: videoProps) => {
 
     const [isSpeaking, setIsSpeaking] = useState(false)
-    const [recongnizeGesture, setRecongnizeGesture] = useState(false)
-    const [isGestureRecognizer, setGestureRecognizer] = useState<GestureRecognizerResult | null>(null)
 
     const videoRef = useRef<HTMLVideoElement>(null)
+    const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
-    const lastVideotimeRef = useRef<number>(-1)
-
-    const createGestureRecognizer = useCallback(async () => {
-        if (localStreamRef && localStreamRef.current) {
-            const vision = await FilesetResolver.forVisionTasks(
-                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
-            );
-            const gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
-                baseOptions: {
-                    modelAssetPath: "https://storage.googleapis.com/mediapipe-tasks/gesture_recognizer/gesture_recognizer.task",
-                    delegate: 'GPU',
-                },
-                numHands: 2,
-                runningMode: 'VIDEO'
-            });
-            const currentTime = performance.now()
-            if (localStreamRef.current.currentTime !== lastVideotimeRef.current) {
-                lastVideotimeRef.current = localStreamRef.current.currentTime
-                const result = gestureRecognizer.recognizeForVideo(localStreamRef.current, currentTime)
-                setGestureRecognizer(result)
-            }
-        }
-    }, [localStreamRef])
-
-    useEffect(() => {
-        if (recongnizeGesture) {
-            createGestureRecognizer()
-        }
-    })
-
-    useEffect(() => {
-        console.log(isGestureRecognizer, 'here')
-    }, [isGestureRecognizer])
-
+    const { isGestureEnabled, isGestureRecognizer, setisGestureEnabled } = useGesture({ userType, localStreamRef })
+    const { isVirtualEnabled, setIsVirtualEnabled } = useVirtualBackground({ userType, localStreamRef, canvasRef })
 
     useEffect(() => {
         if (userType === 'remote' && name) {
@@ -116,19 +84,33 @@ const VideoTile = ({ userType, localStreamRef, videoStreamRef, name, isMedia, ro
                     </div>
                 }
             </div>
-            <video
-                ref={userType === 'local' ? localStreamRef : videoRef}
-                muted={userType === 'local'}
-                playsInline
-                autoPlay
-                onLoadedMetadata={() => userType === 'local' ? localStreamRef?.current?.play() : videoRef.current?.play()}
-                style={{
-                    transform: 'scaleX(-1)',
-                    width: '100%',
-                    height: '100%',
-                    objectFit: 'cover'
-                }}
-            />
+            {
+                <>
+                    <video
+                        ref={userType === 'local' ? localStreamRef : videoRef}
+                        muted={userType === 'local'}
+                        playsInline
+                        autoPlay
+                        onLoadedMetadata={() => userType === 'local' ? localStreamRef?.current?.play() : videoRef.current?.play()}
+                        style={{
+                            transform: 'scaleX(-1)',
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                            display: userType === 'local' && isVirtualEnabled ? 'none' : 'block'
+                        }}
+                    />
+                    <canvas
+                        ref={canvasRef}
+                        style={{
+                            transform: 'scaleX(-1)',
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                        }}
+                    />
+                </>
+            }
             {
                 userType === 'local' &&
                 <div className="absolute z-10 bottom-2 w-full flex justify-between gap-1 px-2">
@@ -136,17 +118,27 @@ const VideoTile = ({ userType, localStreamRef, videoStreamRef, name, isMedia, ro
                         variant="secondary"
                         size="icon"
                         className="size-9 rounded-full"
-                        onClick={() => setRecongnizeGesture(!recongnizeGesture)}
+                        onClick={() => setisGestureEnabled(!isGestureEnabled)}
                     >
                         {
                             <Hand size={20} />
                         }
                     </Button>
-                    {
-                        isGestureRecognizer?.gestures.map((item, index) => (
-                            <h1 className="text-2xl text-black font-bold">{item[index].categoryName}</h1>
-                        ))
-                    }
+                    <Button
+                        variant="secondary"
+                        size="icon"
+                        className="size-9 rounded-full"
+                        onClick={() => setIsVirtualEnabled(!isVirtualEnabled)}
+                    >
+                        {
+                            <Hand size={20} />
+                        }
+                    </Button>
+                    {isGestureRecognizer?.gestures.map((handGestures, handIndex) => (
+                        <h1 key={handIndex} className="text-2xl text-black font-bold">
+                            {handGestures[0]?.categoryName}
+                        </h1>
+                    ))}
                 </div>
             }
         </div>

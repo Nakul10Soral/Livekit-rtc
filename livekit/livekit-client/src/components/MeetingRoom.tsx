@@ -183,10 +183,6 @@ const MeetingRoom = () => {
                 </div>
             </div>
 
-            <div>
-                <h1>hello</h1>
-            </div>
-
             <div className="flex justify-center flex-1 flex-wrap gap-2 px-4 content-start">
                 <VideoTile
                     localStreamRef={localStreamRef}
