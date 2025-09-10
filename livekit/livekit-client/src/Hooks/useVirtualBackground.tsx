@@ -1,160 +1,178 @@
-import { FilesetResolver, ImageSegmenter, ImageSegmenterResult } from "@mediapipe/tasks-vision";
+import {
+    FilesetResolver,
+    ImageSegmenter,
+    type ImageSegmenterResult,
+} from "@mediapipe/tasks-vision";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const useVirtualBackground = ({
-    userType,
-    localStreamRef,
-    canvasRef,
-}: {
-    userType: "local" | "remote";
-    localStreamRef?: React.RefObject<HTMLVideoElement | null>;
+type BackgroundType =
+    | { type: "color"; color: [number, number, number] }
+    | { type: "blur"; blurAmount?: number }
+    | { type: "image"; image: HTMLImageElement | null };
+
+interface UseVirtualBackgroundProps {
+    videoRef?: React.RefObject<HTMLVideoElement | null>;
     canvasRef?: React.RefObject<HTMLCanvasElement | null>;
-}) => {
-    const [isVirtualEnabled, setIsVirtualEnabled] = useState(false);
+    background?: BackgroundType;
+}
 
-    const vertualizerRef = useRef<ImageSegmenter | null>(null);
-    const animationFrameRef = useRef<number | null>(null);
-    const lastVideotimeRef = useRef<number>(-1);
-    const canvasContextRef = useRef<CanvasRenderingContext2D | null>(null);
+const useVirtualBackground = ({
+    videoRef,
+    canvasRef,
+    background = { type: "color", color: [200, 200, 200] },
+}: UseVirtualBackgroundProps) => {
+    const [isEnabled, setIsEnabled] = useState(false);
+    const segmenterRef = useRef<ImageSegmenter | null>(null);
+    const rafRef = useRef<number | null>(null);
+    const lastFrameTimeRef = useRef<number>(-1);
+    const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
 
-    /** Step 1: Initialize ImageSegmenter */
-    const initImageSegmenter = useCallback(async () => {
-        if (userType === "local" && !vertualizerRef.current) {
-            try {
-                const vision = await FilesetResolver.forVisionTasks(
-                    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
-                );
-                const imageSegmenter = await ImageSegmenter.createFromOptions(
-                    vision,
-                    {
-                        baseOptions: {
-                            modelAssetPath:
-                                "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite",
-                        },
-                        outputCategoryMask: true,
-                        outputConfidenceMasks: false,
-                        runningMode: "VIDEO",
-                    }
-                );
+    const initSegmenter = useCallback(async () => {
+        if (segmenterRef.current) return;
 
-                vertualizerRef.current = imageSegmenter;
-            } catch (error) {
-                console.error("Failed to initialize ImageSegmenter:", error);
-            }
-        }
-    }, [userType]);
+        const vision = await FilesetResolver.forVisionTasks(
+            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
+        );
 
-    /** Step 2: Callback for each video frame */
-    const callbackForVideo = useCallback(
+        const segmenter = await ImageSegmenter.createFromOptions(vision, {
+            baseOptions: {
+                modelAssetPath:
+                    "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite",
+                delegate: 'GPU'
+            },
+            runningMode: "VIDEO",
+            outputCategoryMask: true,
+        });
+
+        console.log("started")
+        segmenterRef.current = segmenter;
+    }, []);
+
+    const handleSegmentation = useCallback(
         (result: ImageSegmenterResult) => {
-            if (!result || !canvasContextRef.current || !localStreamRef?.current)
-                return;
+            if (!canvasRef || !canvasRef.current || !videoRef || !videoRef.current || !ctxRef.current) return;
 
-            const canvas = canvasRef?.current;
-            if (!canvas) return;
+            const video = videoRef.current;
+            const canvas = canvasRef.current;
+            const ctx = ctxRef.current;
 
-            const ctx = canvasContextRef.current;
-            const width = localStreamRef.current.videoWidth;
-            const height = localStreamRef.current.videoHeight;
-
+            const width = video.videoWidth;
+            const height = video.videoHeight;
             if (width === 0 || height === 0) return;
 
-            // Resize canvas to match video
             canvas.width = width;
             canvas.height = height;
 
-            // Draw current video frame
-            ctx.drawImage(localStreamRef.current, 0, 0, width, height);
+            ctx.drawImage(video, 0, 0, width, height);
             const frame = ctx.getImageData(0, 0, width, height);
             const frameData = frame.data;
 
-            // Get segmentation mask
             if (!result.categoryMask) return;
             const mask = result.categoryMask.getAsUint8Array();
 
-            // Output frame
             const output = ctx.createImageData(width, height);
             const outputData = output.data;
 
             for (let i = 0; i < mask.length; i++) {
-                const isPerson = mask[i] === 1; // 1 → person, 0 → background
-                const pixelIndex = i * 4;
+                const isPerson = mask[i] === 0;
+                const p = i * 4;
 
-                if (isPerson) {
-                    // Keep original pixel
-                    outputData[pixelIndex] = frameData[pixelIndex];
-                    outputData[pixelIndex + 1] = frameData[pixelIndex + 1];
-                    outputData[pixelIndex + 2] = frameData[pixelIndex + 2];
-                    outputData[pixelIndex + 3] = 255;
+                if (!isPerson) {
+                    outputData[p] = frameData[p];
+                    outputData[p + 1] = frameData[p + 1];
+                    outputData[p + 2] = frameData[p + 2];
+                    outputData[p + 3] = 255;
                 } else {
-                    // Replace background (solid gray color here)
-                    outputData[pixelIndex] = 200;
-                    outputData[pixelIndex + 1] = 200;
-                    outputData[pixelIndex + 2] = 200;
-                    outputData[pixelIndex + 3] = 255;
+                    if (background.type === "color") {
+                        const [r, g, b] = background.color;
+                        outputData[p] = r;
+                        outputData[p + 1] = g;
+                        outputData[p + 2] = b;
+                        outputData[p + 3] = 255;
+                    } else if (background.type === "image" && background.image) {
+                        const x = i % width;
+                        const y = Math.floor(i / width);
+                        ctx.drawImage(background.image, 0, 0, width, height);
+                        const bgPixel = ctx.getImageData(x, y, 1, 1).data;
+                        outputData[p] = bgPixel[0];
+                        outputData[p + 1] = bgPixel[1];
+                        outputData[p + 2] = bgPixel[2];
+                        outputData[p + 3] = 255;
+                    } else if (background.type === "blur") {
+                        outputData[p] = 200;
+                        outputData[p + 1] = 200;
+                        outputData[p + 2] = 200;
+                        outputData[p + 3] = 255;
+                    }
                 }
             }
 
-            // Draw final composited frame
             ctx.putImageData(output, 0, 0);
+
+            if (background.type === "blur") {
+                canvas.style.filter = `blur(${background.blurAmount || 8}px)`;
+            } else {
+                canvas.style.filter = "none";
+            }
         },
-        [canvasRef, localStreamRef]
+        [canvasRef, videoRef, background]
     );
 
-    const changeBackground = useCallback(() => {
+    const processFrame = useCallback(() => {
         if (
-            vertualizerRef.current &&
-            localStreamRef?.current &&
-            !localStreamRef.current.paused &&
-            localStreamRef.current.videoWidth > 0 &&
-            localStreamRef.current.videoHeight > 0 &&
-            canvasRef?.current &&
-            canvasContextRef.current
+            !segmenterRef.current ||
+            !videoRef ||
+            !videoRef.current ||
+            videoRef.current.paused ||
+            videoRef.current.videoWidth === 0
         ) {
-            try {
-                const currentTime = performance.now();
-                if (localStreamRef.current.currentTime !== lastVideotimeRef.current) {
-                    lastVideotimeRef.current = localStreamRef.current.currentTime;
-
-                    vertualizerRef.current.segmentForVideo(
-                        localStreamRef.current,
-                        currentTime,
-                        callbackForVideo
-                    );
-                }
-            } catch (error) {
-                console.error("Segmentation error:", error);
-            }
+            rafRef.current = requestAnimationFrame(processFrame);
+            return;
         }
-        animationFrameRef.current = requestAnimationFrame(changeBackground);
-    }, [callbackForVideo, canvasRef, localStreamRef]);
+
+        const video = videoRef.current;
+        const now = performance.now();
+
+        if (video.currentTime !== lastFrameTimeRef.current) {
+            lastFrameTimeRef.current = video.currentTime;
+
+            segmenterRef.current.segmentForVideo(video, now, handleSegmentation);
+        }
+
+        rafRef.current = requestAnimationFrame(processFrame);
+    }, [handleSegmentation, videoRef]);
 
     useEffect(() => {
-        if (canvasRef?.current && !canvasContextRef.current) {
-            canvasContextRef.current = canvasRef.current.getContext("2d");
+        if (canvasRef && canvasRef.current && !ctxRef.current) {
+            ctxRef.current = canvasRef.current.getContext("2d");
         }
     }, [canvasRef]);
 
     useEffect(() => {
-        if (isVirtualEnabled) {
-            initImageSegmenter();
+        if (isEnabled) {
+            initSegmenter();
         }
-    }, [initImageSegmenter, isVirtualEnabled]);
+    }, [isEnabled, initSegmenter]);
 
     useEffect(() => {
-        if (isVirtualEnabled && vertualizerRef.current) {
-            animationFrameRef.current = requestAnimationFrame(changeBackground);
+        if (isEnabled && segmenterRef.current) {
+            rafRef.current = requestAnimationFrame(processFrame);
         }
         return () => {
-            if (animationFrameRef.current) {
-                cancelAnimationFrame(animationFrameRef.current);
-            }
+            if (rafRef.current) cancelAnimationFrame(rafRef.current);
         };
-    }, [isVirtualEnabled, changeBackground]);
+    }, [isEnabled, processFrame]);
+
+    const getProcessedStream = useCallback(() => {
+        if (canvasRef) {
+            return canvasRef.current?.captureStream() || null;
+        }
+    }, [canvasRef]);
 
     return {
-        isVirtualEnabled,
-        setIsVirtualEnabled,
+        isEnabled,
+        setIsEnabled,
+        getProcessedStream,
     };
 };
 

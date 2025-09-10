@@ -22,7 +22,11 @@ const VideoTile = ({ userType, localStreamRef, videoStreamRef, name, isMedia, ro
     const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
     const { isGestureEnabled, isGestureRecognizer, setisGestureEnabled } = useGesture({ userType, localStreamRef })
-    const { isVirtualEnabled, setIsVirtualEnabled } = useVirtualBackground({ userType, localStreamRef, canvasRef })
+    const { isEnabled, setIsEnabled, getProcessedStream } = useVirtualBackground({
+        videoRef: localStreamRef,
+        canvasRef: canvasRef,
+        background: { type: "color", color: [0, 255, 0] }, // solid green
+    });
 
     useEffect(() => {
         if (userType === 'remote' && name) {
@@ -61,6 +65,29 @@ const VideoTile = ({ userType, localStreamRef, videoStreamRef, name, isMedia, ro
         }
     }, [videoStreamRef])
 
+    useEffect(() => {
+        const pub = async () => {
+            if (roomRef.current && isEnabled) {
+                const vgStream = getProcessedStream();
+                if (vgStream) {
+                    const newTrack = vgStream.getVideoTracks()[0];
+
+                    const participant = roomRef.current.localParticipant;
+                    participant.trackPublications.forEach((pub) => {
+                        const track = pub.videoTrack;
+                        if (track) {
+                            participant.unpublishTrack(track);
+                        }
+                    })
+                    await participant.publishTrack(newTrack, { name: "camera" });
+                }
+            }
+        };
+
+        pub();
+    }, [isEnabled, getProcessedStream, roomRef]);
+
+
     return (
         <div className={`flex-1 min-w-60 self-start h-auto aspect-video relative rounded-lg max-w-80 ${isSpeaking ? "border-green-400 border-4" : "border-gray-400 border-2"} bg-black overflow-hidden transition-all duration-500 ease-in-out`}>
             <div className="absolute z-10 flex p-2 justify-between w-full">
@@ -97,7 +124,7 @@ const VideoTile = ({ userType, localStreamRef, videoStreamRef, name, isMedia, ro
                             width: '100%',
                             height: '100%',
                             objectFit: 'cover',
-                            display: userType === 'local' && isVirtualEnabled ? 'none' : 'block'
+                            display: userType === 'local' && isEnabled ? 'none' : 'block'
                         }}
                     />
                     <canvas
@@ -108,6 +135,7 @@ const VideoTile = ({ userType, localStreamRef, videoStreamRef, name, isMedia, ro
                             height: '100%',
                             objectFit: 'cover',
                         }}
+                        className="min-w-60 aspect-video h-auto"
                     />
                 </>
             }
@@ -128,7 +156,7 @@ const VideoTile = ({ userType, localStreamRef, videoStreamRef, name, isMedia, ro
                         variant="secondary"
                         size="icon"
                         className="size-9 rounded-full"
-                        onClick={() => setIsVirtualEnabled(!isVirtualEnabled)}
+                        onClick={() => setIsEnabled(!isEnabled)}
                     >
                         {
                             <Hand size={20} />
